@@ -59,3 +59,16 @@ Query: `order_delivered_carrier_date > order_delivered_customer_date`
 
 **Decision**
 - Treat these 23 rows as timestamp errors and exclude them from the analytics layer used for delivery-time features and ML training.
+
+### Additional timestamp sanity check: delivery before approval
+- `order_delivered_customer_date < order_approved_at` returned **61 rows**.
+
+**Interpretation**
+- These records violate the expected order lifecycle (an order cannot be delivered before being approved).
+- Treat as **timestamp integrity errors** (similar to the 23 carrier-after-customer cases).
+
+**Decision**
+- Exclude these 61 rows from the Silver/Gold layer used for:
+  - delivery duration features
+  - late-delivery label creation
+  - ML training and KPI reporting
