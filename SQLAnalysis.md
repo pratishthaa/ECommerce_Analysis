@@ -1,74 +1,139 @@
-# SQL Outputs & Insights Log — Olist E-Commerce (SQL Server)
+# Olist E‑Commerce — SQL Outputs & Insights
 
-I have documented the key **SQL checks, outputs, and insights** generated before running Python EDA / ML and building Power BI dashboard.  
-This is to keep a clear record of **data quality**, **join integrity**, and **feature readiness**.
-
----
-
-## Dataset Tables
-
-| File / Table | Row Count |
-|---|---:|
-| `olist_customers_dataset` | 99,441 |
-| `olist_geolocation_dataset` | 1,000,163 |
-| `olist_order_items_dataset` | 112,650 |
-| `olist_order_payments_dataset` | 103,886 |
-| `olist_order_reviews_dataset` | 99,224 |
-| `olist_orders_dataset` | 99,441 |
-| `olist_products_dataset` | 32,951 |
-| `olist_sellers_dataset` | 3,095 |
-| `product_category_name_translation` | (not provided) |
+This file is the documentation of insights I collected over what I validated and learned in SQL Server.
 
 ---
 
-### 1) Reviews table key behavior
-- **`review_id` is not unique** (often appears twice).
-- Some **orders have multiple review rows** (typically **2–3** in the cases checked).
+## What I loaded into SQL Server
+I imported the Olist dataset into SQL Server (`dbo.*`) and confirmed ingestion completeness using row counts:
 
-**Interpretation**
-- The reviews dataset should be treated as a **one-to-many** relationship with orders.
-- For analytics/ML features, reviews must be **aggregated to the order level** (e.g., max review score, latest review, count of reviews) before joining to the main order table.
-
----
-
-### 2) Missing values in `olist_orders_dataset` timestamps
-Output from missing timestamp query:
-
-| missing_purchase_ts | missing_approved_ts | missing_delivered_carrier_ts | missing_delivered_customer_ts | missing_estimated_delivery_ts |
-|---:|---:|---:|---:|---:|
-| 0 | 160 | 1783 | 2965 | 0 |
-
-**Interpretation**
-- `order_purchase_timestamp` and `order_estimated_delivery_date` are complete (0 missing), which is great for defining the late-delivery target.
-- Missing `delivered_customer_date` likely indicates **canceled/unfulfilled orders** or orders not completed at the time of snapshot.  
-  These rows should be **excluded from supervised training** where the target requires actual delivery.
-- Missing `approved_at` and `delivered_carrier_date` are smaller but still relevant; these fields can be optional features depending on model design.
+- Customers: 99,441  
+- Geolocation: 1,000,163  
+- Order Items: 112,650  
+- Payments: 103,886  
+- Reviews: 99,224  
+- Orders: 99,441  
+- Products: 32,951  
+- Sellers: 3,095  
 
 ---
 
-### 3) Date validity issue detected
-Query: `order_delivered_carrier_date > order_delivered_customer_date`
+## Data quality checks I ran (and what I found)
 
-- **Invalid rows found:** 23
+### Keys + relationship structure
+- `order_id`, `customer_id`, `product_id`, `seller_id` behave as unique identifiers in their respective tables.
+- Composite keys worked as expected for:
+  - order items: (`order_id`, `order_item_id`)
+  - payments: (`order_id`, `payment_sequential`)
+
+**Important finding:** `review_id` is *not unique* (often appears twice) and some orders have **2–3** review rows.  
+**What I did:** I treated reviews as **one‑to‑many** and aggregated them to the order level before joining.
+
+---
+
+### Missing timestamps (orders)
+I checked for missingness in order lifecycle timestamps:
+
+- missing_purchase_ts = 0  
+- missing_approved_ts = 160  
+- missing_delivered_carrier_ts = 1783  
+- missing_delivered_customer_ts = 2965  
+- missing_estimated_delivery_ts = 0  
 
 **Interpretation**
-- These are timestamp logic errors (carrier delivery date occurring after customer delivery date).
-- ### Timestamp integrity issue (carrier date after customer delivery)
-- Delivered orders (non-null delivered date): **96,470**
-- Share of delivered orders affected: **0.000238 (~0.024%)**
+- Purchase + estimated delivery are complete, so I can safely define lateness using delivered vs. estimated date.
+- Missing delivery timestamps likely represent canceled/unfulfilled orders; I exclude these from “delivered-only” modeling/metrics.
 
-**Decision**
-- Treat these 23 rows as timestamp errors and exclude them from the analytics layer used for delivery-time features and ML training.
+---
 
-### Additional timestamp sanity check: delivery before approval
-- `order_delivered_customer_date < order_approved_at` returned **61 rows**.
+### Timestamp integrity
+I checked for impossible timestamp sequences:
+
+- `order_delivered_carrier_date > order_delivered_customer_date`: **23 rows**  
+  - Out of delivered orders, this is **0.000238 (~0.024%)** — very small but worth filtering.
+- `order_delivered_customer_date < order_approved_at`: **61 rows**  
+  - Also invalid for a standard order lifecycle.
+
+**Decision:** I filtered these anomalies out in my Silver clean view rather than guessing corrections.
+
+---
+
+### Join integrity
+All join integrity checks returned **0 missing links**, meaning:
+- Orders join to customers cleanly
+- Delivered orders join to order items cleanly
+- Order items join to products and sellers cleanly
+
+This minimized risk of silent row loss when building my analytics dataset.
+
+---
+
+## Silver/Gold layering approach
+
+### Silver (clean + safe joins)
+I created:
+- `silver.vw_orders_delivered_clean` — delivered orders only, excluding the 23 + 61 timestamp anomalies
+- `silver.vw_items_by_order` — order totals and basket composition
+- `silver.vw_payments_by_order` — order-level payment totals
+- `silver.vw_reviews_by_order` — order-level review aggregations
+
+This prevents row duplication when joining one‑to‑many tables.
+
+---
+
+### Gold (features for Python EDA + ML + Power BI)
+I created `gold.vw_order_delivery_features` and validated:
+
+- Clean delivered orders: **96,386**
+- Late delivery rate: **0.08117 (~8.12%)**
+- Average delivery time: **12.50 days**
+- Average order value (items total): **137.05**
 
 **Interpretation**
-- These records violate the expected order lifecycle (an order cannot be delivered before being approved).
-- Treat as **timestamp integrity errors** (similar to the 23 carrier-after-customer cases).
+- Late deliveries are a meaningful minority class (~8%), suitable for a late‑delivery risk model.
+- Delivery time varies a lot; I will handle outliers carefully in Python EDA.
 
-**Decision**
-- Exclude these 61 rows from the Silver/Gold layer used for:
-  - delivery duration features
-  - late-delivery label creation
-  - ML training and KPI reporting
+---
+
+## Delay severity insights
+I added:
+- `delay_days = delivered_date − estimated_delivery_date` (negative = early)
+- `late_days = max(delay_days, 0)` (late severity)
+
+Results:
+- min delay_days = **-147**
+- max delay_days = **188**
+- avg delay_days = **-11.87**
+
+**Interpretation**
+- On average, deliveries arrive ~11.9 days early (estimated delivery date appears conservative).
+- Extreme outliers exist, so I quantified them:
+  - delay ≥ 60: **84**
+  - delay ≥ 120: **26**
+  - delay ≤ -60: **35**
+  - delay ≤ -120: **4**
+
+---
+
+## Category + region insights (SQL)
+
+### Category
+I engineered a “top category per order” feature and summarized lateness by category.
+
+Highest late rates among the top 20 categories by late_rate included:
+- `casa_conforto_2`: 17.39% late (n=23)
+- `moveis_colchao_e_estofado`: 13.51% late (n=37)
+- `audio`: 12.93% late (n=348)
+
+I found **1,378 orders** where `top_category` is NULL.
+**Decision:** keep these orders and treat the category as **Unknown** in BI/ML (rather than dropping them).
+
+### State
+States with the highest late rates (top 15):
+- AL: 23.93% (n=397)
+- MA: 19.67% (n=717)
+- PI: 15.97% (n=476)
+- CE: 15.34% (n=1,278)
+- SE: 15.22% (n=335)
+
+This suggests strong geographic/logistics variation that I will visualize in Power BI and explore statistically in Python.
