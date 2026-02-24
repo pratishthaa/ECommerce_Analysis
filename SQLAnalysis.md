@@ -53,4 +53,9 @@ Query: `order_delivered_carrier_date > order_delivered_customer_date`
 
 **Interpretation**
 - These are timestamp logic errors (carrier delivery date occurring after customer delivery date).
-- These rows should be **filtered out** or **handled explicitly** in the cleaned (Silver) layer so delivery-duration features remain valid.
+- ### Timestamp integrity issue (carrier date after customer delivery)
+- Delivered orders (non-null delivered date): **96,470**
+- Share of delivered orders affected: **0.000238 (~0.024%)**
+
+**Decision**
+- Treat these 23 rows as timestamp errors and exclude them from the analytics layer used for delivery-time features and ML training.
