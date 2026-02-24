@@ -33,3 +33,40 @@ UNION ALL SELECT 'olist_orders_dataset', COUNT(*) FROM dbo.olist_orders_dataset
 UNION ALL SELECT 'olist_products_dataset', COUNT(*) FROM dbo.olist_products_dataset
 UNION ALL SELECT 'olist_sellers_dataset', COUNT(*) FROM dbo.olist_sellers_dataset
 UNION ALL SELECT 'product_category_name_translation', COUNT(*) FROM dbo.product_category_name_translation;
+```
+
+## Findings so far (SQL data quality checks)
+
+### 1) Reviews table key behavior
+- **`review_id` is not unique** (often appears twice).
+- Some **orders have multiple review rows** (typically **2–3** in the cases checked).
+
+**Interpretation**
+- The reviews dataset should be treated as a **one-to-many** relationship with orders.
+- For analytics/ML features, reviews must be **aggregated to the order level** (e.g., max review score, latest review, count of reviews) before joining to the main order table.
+
+---
+
+### 2) Missing values in `olist_orders_dataset` timestamps
+Output from missing timestamp query:
+
+| missing_purchase_ts | missing_approved_ts | missing_delivered_carrier_ts | missing_delivered_customer_ts | missing_estimated_delivery_ts |
+|---:|---:|---:|---:|---:|
+| 0 | 160 | 1783 | 2965 | 0 |
+
+**Interpretation**
+- `order_purchase_timestamp` and `order_estimated_delivery_date` are complete (0 missing), which is great for defining the late-delivery target.
+- Missing `delivered_customer_date` likely indicates **canceled/unfulfilled orders** or orders not completed at the time of snapshot.  
+  These rows should be **excluded from supervised training** where the target requires actual delivery.
+- Missing `approved_at` and `delivered_carrier_date` are smaller but still relevant; these fields can be optional features depending on model design.
+
+---
+
+### 3) Date validity issue detected
+Query: `order_delivered_carrier_date > order_delivered_customer_date`
+
+- **Invalid rows found:** 23
+
+**Interpretation**
+- These are timestamp logic errors (carrier delivery date occurring after customer delivery date).
+- These rows should be **filtered out** or **handled explicitly** in the cleaned (Silver) layer so delivery-duration features remain valid.
