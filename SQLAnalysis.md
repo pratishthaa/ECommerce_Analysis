@@ -1,4 +1,4 @@
-# Olist E‑Commerce — SQL Outputs & Insights
+# Olist E‑Commerce: SQL Outputs & Insights
 
 This file is the documentation of insights I collected over what I validated and learned in SQL Server.
 
