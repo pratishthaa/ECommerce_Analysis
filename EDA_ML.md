@@ -9,6 +9,7 @@ In this EDA, I connect to my SQL Server database and pull the **Gold feature vie
 - **Unit of analysis:** 1 row = 1 delivered order
 - **Primary target:** `is_late` (1 = delivered after estimated date, else 0)
 
+---
 
 ## EDA Workflow (What I Did)
 
@@ -19,6 +20,7 @@ In this EDA, I connect to my SQL Server database and pull the **Gold feature vie
 ### 2) Missing value handling
 - I computed missingness across all features.
 - I treated missing `top_category` as `"Unknown"` to avoid dropping valid orders:
+
 ```python
 df["top_category"] = df["top_category"].fillna("Unknown")
 ```
@@ -89,5 +91,39 @@ df["top_category"] = df["top_category"].fillna("Unknown")
 - Time-based logistics features (`days_to_deliver`, `days_carrier_to_customer`, `delay_days`) are much more associated with late deliveries than spend features (`total_price`, `total_freight`).
 - **Interpretation:** lateness is primarily explained by operational timing rather than order value.
 
----
 
+# Machine Learning (Modeling + Evaluation)
+
+## Modeling goal
+Build an interpretable baseline and compare models for **late delivery risk screening**, prioritizing metrics that matter under class imbalance.
+
+## What I did post-EDA
+- Created train/test splits (including time-aware split logic when timestamps are available)
+- Trained and evaluated multiple classifiers, including:
+  - Logistic Regression (with class weights)
+  - Tree-based boosting models (e.g., GradientBoosting / HistGradientBoosting)
+  - RandomForest variants
+- Tuned decision thresholds to meet an operational goal (e.g., **Recall ≥ 60%**)
+- Compared models using:
+  - **PR-AUC** (preferred over ROC-AUC for imbalanced classes)
+  - **Recall / Precision** for the late class
+  - **Lift@10%** to evaluate “top-risk list” usefulness
+
+## Key modeling results (high level)
+- A baseline weighted Logistic Regression achieved **PR-AUC ≈ 0.368**.
+- **Lift@10% ≈ 5.0**, meaning the top 10% highest-risk orders contain ~5× the baseline late rate.
+- Downsampling negatives (1:1 or 2:1) did **not** improve PR-AUC vs. class-weighting:
+  - Weighted full train: **0.3679**
+  - Downsample 1:1: **0.3654**
+  - Downsample 2:1: **0.3651**
+- **Interpretation:** class-weighting preserves more information from the on-time class and improves ranking stability.
+
+## How I interpret PR-AUC here
+PR-AUC can look “small” in absolute terms under imbalance, so I compare it to the **baseline late rate** (~8%).  
+A PR-AUC around ~0.37 is **multiple times better than random** and supports a **risk-ranking workflow** (Top-K screening).
+
+## Best decision / recommended operating policy
+- Use the model as a **prioritization tool**:
+  - Flag **Top-K** highest-risk orders (e.g., top 5–10%) for intervention
+  - Or tune a threshold to hit a target recall (e.g., ≥60%) based on ops capacity
+- Report operational metrics (top-K precision/recall, lift, alert volume) rather than accuracy.
