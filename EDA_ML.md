@@ -1,4 +1,4 @@
-# Python EDA — E-Commerce Delivery Analytics
+# Python EDA: E-Commerce Delivery Analytics
 
 In this EDA, I connect to my SQL Server database and pull the **Gold feature view** (`gold.vw_order_delivery_features_v4`) into Python to explore late delivery behavior, validate feature quality, and generate insights for dashboarding and machine learning.
 
