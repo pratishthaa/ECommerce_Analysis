@@ -1,7 +1,7 @@
 # E-Commerce Delivery Analysis (Excel → SQL → Python EDA/Model → Power BI)
 
 <p align="center">
-  <img src="ECOMMERCELOGO.png" alt="Project logo" width="540"/>
+  <img src="logo.png" alt="Project logo" width="540"/>
 </p>
 
 This project is an end-to-end analytics case study on e-commerce order delivery performance. I started with quick exploratory checks in Excel, then built a clean analytics layer in SQL Server, performed deeper EDA + baseline modeling in Python, and finally created a Power BI dashboard to communicate insights.
